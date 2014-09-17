@@ -218,8 +218,10 @@ class pdoFetch extends pdoTools {
 			if (is_string($tmp) && ($tmp[0] == '{' || $tmp[0] == '[')) {
 				$tmp = $this->modx->fromJSON($tmp);
 			}
-			$having = $this->replaceTVCondition($tmp);
-			$this->query->having($having);
+
+			$having = $this->replaceTVCondition($tmp,true);
+			$this->addTime('Having: ' .print_r($having, true), microtime(true) - $time);
+			$this->query->query['having']=$this->simpleParseConditions($having);
 
 			$condition = array();
 			foreach ($having as $k => $v) {
@@ -228,6 +230,111 @@ class pdoFetch extends pdoTools {
 			}
 			$this->addTime('Added having condition: <b>' .implode(', ',$condition).'</b>', microtime(true) - $time);
 		}
+	}
+
+
+  /**
+   * Parses an xPDO condition expression like method parseConditions (in class xPDOQuery)
+   * into one or more xPDOQueryConditions.
+   *
+   * @param mixed $conditions A valid xPDO condition expression.
+   * @return array||xPDOQueryCondition An xPDOQueryCondition or array of xPDOQueryConditions.
+   */
+	public function simpleParseConditions( $array) {
+		$time = microtime(true);
+
+		 	/*
+		 	 // example conditions
+		 	 $array=array(
+		 		"zzz = 555"
+		    "xxx:=:OR"=>123,
+		    "xxx2:="=>"123",
+		    "test:IN"=>array(1,2,3),
+		    "test2:IN"=>123
+		  );*/
+
+    foreach ($array as $key => $val) {
+
+        $key_operator= explode(':', $key);
+        if ($key_operator && count($key_operator) === 2) {
+            $key= $key_operator[0];
+            $operator= $key_operator[1];
+        }
+        elseif ($key_operator && count($key_operator) === 3) {
+            $conj= $key_operator[0];
+            $key= $key_operator[1];
+            $operator= $key_operator[2];
+        }
+
+        $operator=$operator ? $operator : "=";
+
+
+        if (isset($key)) {
+
+					if (is_numeric($key))	$key="";
+
+          if ($val === null) {
+              if (!in_array($operator, array('IS', 'IS NOT'))) {
+                  $operator= $operator === '!=' ? 'IS NOT' : 'IS';
+              }
+          }
+
+					/*
+						elseif (isset($fieldMeta[$key]) && !in_array($fieldMeta[$key]['phptype'], $this->_quotable)) {
+	              $type= PDO::PARAM_INT;
+	          }
+	          else {
+	              $type= PDO::PARAM_STR;
+	          }
+          */
+
+          $type= PDO::PARAM_STR;
+          if ( !empty($key) && in_array(strtoupper($operator), array('IN', 'NOT IN')) && is_array($val)) {
+            $vals = array();
+            foreach ($val as $v) {
+                if ($v === null) {
+                    $vals[] = null;
+                } else {
+                    switch (gettype($v)) {
+                        case 'integer':
+                            $vals[] = (integer) $v;
+                            break;
+                        case 'string':
+                            $vals[] = $this->modx->quote($v);
+                            break;
+                        default:
+                            $vals[] = $v;
+                            break;
+                    }
+                }
+            }
+            $val = "(" . implode(',', $vals) . ")";
+            $sql = trim("{$this->modx->escape($key)} {$operator} {$val}");
+            $result[]= new xPDOQueryCondition(array('sql' => $sql, 'binding' => null, 'conjunction' => $conj));
+            continue;
+          }
+          $field= array ();
+          if (!empty($key)) {
+	          $field['sql']= trim($this->modx->escape($key) . ' ' . $operator . ' ?');
+	          $field['binding']= array (
+	              'value' => $val,
+	              'type' => $type,
+	              'length' => 0
+	          );
+	          $field['conjunction']= $conj;
+	        }else{
+	          $field['sql']= trim($val);
+	        }
+
+          $result[]= new xPDOQueryCondition($field);
+        } else {
+            throw new xPDOException("Invalid query expression");
+        }
+    }
+
+ 		$this->addTime('Having query detail: ' .print_r($result, true), microtime(true) - $time);
+
+    return $result;
 	}
 
 
@@ -817,18 +924,25 @@ class pdoFetch extends pdoTools {
 	 * For example, field "test" will be replaced with "TVtest.value", if template variable "test" was joined in query.
 	 *
 	 * @param array $array Array for replacement
+	 * @param bool  $having True if for "having" part.
 	 *
 	 * @return array $sorts Array with replaced conditions
 	 */
-	public function replaceTVCondition(array $array) {
+	public function replaceTVCondition(array $array, $having = false ) {
 		if (empty($this->config['tvsJoin'])) {return $array;}
 
 		$time = microtime(true);
 		$tvs = implode('|', array_keys($this->config['tvsJoin']));
 
+		$tvPrefix = !empty($this->config['tvPrefix']) ?
+			trim($this->config['tvPrefix'])
+			: '';
+
 		$sorts = array();
 		foreach ($array as $k => $v) {
-			$callback = create_function('$matches', 'return \'`TV\'.strtolower($matches[1]).\'`.`value`\';');
+			$tmp_fun=(!$having)? 'return \'`TV\'.strtolower($matches[1]).\'`.`value`\';' : 'return \''.$tvPrefix.'\'.strtolower($matches[1]);';
+			$callback = create_function('$matches', $tmp_fun);
+
 			if (is_numeric($k) && is_string($v)) {
 				$tmp = preg_replace_callback('/\b('.$tvs.')\b/i', $callback, $v);
 				$sorts[$k] = $tmp;
