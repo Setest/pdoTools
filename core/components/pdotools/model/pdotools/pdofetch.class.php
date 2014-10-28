@@ -431,7 +431,8 @@ class pdoFetch extends pdoTools {
 				}
 				if (is_string($fields) && !preg_match('/\b'.$alias.'\b|\bAS\b|\(|`/i', $fields) && isset($this->modx->map[$class])) {
 					if ($fields == 'all' || $fields == '*' || empty($fields)) {
-						$fields = $this->modx->getSelectColumns($class, $alias);
+						$prefix = ($this->config['class'] == $alias) ? '' : $alias.'.';
+						$fields = $this->modx->getSelectColumns($class, $alias, $prefix);
 					}
 					else {
 						$fields = $this->modx->getSelectColumns($class, $alias, '', array_map('trim', explode(',', $fields)));
