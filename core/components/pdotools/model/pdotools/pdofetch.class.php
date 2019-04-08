@@ -298,7 +298,7 @@ class pdoFetch extends pdoTools
             if (!empty($this->config[$join])) {
                 $tmp = $this->config[$join];
                 if (is_string($tmp) && ($tmp[0] == '{' || $tmp[0] == '[')) {
-                    $tmp = json_decode($tmp, true);
+                    $tmp = json_decode(preg_replace("/[\n\r]/","",$tmp), true);
                 }
                 if ($join == 'leftJoin' && !empty($this->config['tvsJoin'])) {
                     $tmp = array_merge($tmp, $this->config['tvsJoin']);
